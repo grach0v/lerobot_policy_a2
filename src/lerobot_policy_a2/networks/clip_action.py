@@ -380,7 +380,7 @@ class CLIPActionFusion(nn.Module):
     ):
         super().__init__()
 
-        self.device = device
+        self._init_device = device  # Store initial device for reference
 
         # Cross attention
         self.cross_attn = CrossTransformer(width=width, layers=layers, heads=heads)
@@ -423,6 +423,15 @@ class CLIPActionFusion(nn.Module):
         if task_num is not None:
             self.task_embedding = nn.Embedding(task_num + 1, width)
 
+    @property
+    def device(self) -> torch.device:
+        """Get current device from module parameters."""
+        # Get device from first parameter to ensure consistency
+        try:
+            return next(self.parameters()).device
+        except StopIteration:
+            return torch.device(self._init_device)
+
     def encode_action(self, x: torch.Tensor) -> torch.Tensor:
         """Encode action candidates."""
         grasp_emb = self.action_embbedding(x.to(self.device))
@@ -459,6 +468,13 @@ class CLIPActionFusion(nn.Module):
             cross_feat: Cross-attended features (B, M, D)
             attn_weights: Attention weights (B, M, N)
         """
+        # Ensure all inputs are on the correct device
+        device = self.device
+        pts_pos = pts_pos.to(device)
+        pts_feat = pts_feat.to(device)
+        pts_sim = pts_sim.to(device)
+        actions = actions.to(device)
+
         # Get point features weighted by visual-language similarity
         pts_sim_feat = self.pts_multi_fusion(pts_feat, pts_sim)
 

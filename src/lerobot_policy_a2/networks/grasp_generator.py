@@ -53,16 +53,9 @@ class GraspGenerator:
         """Initialize GraspNet model."""
         try:
             import torch
-            from graspnetAPI import GraspGroup
 
-            # Try to import from the original A2 package
-            import sys
-
-            a2_path = Path(__file__).parent.parent.parent.parent.parent / "A2_new"
-            if a2_path.exists() and str(a2_path) not in sys.path:
-                sys.path.insert(0, str(a2_path))
-
-            from models.graspnet_new_wrapper import GraspNetBaseLine
+            # Import from local graspnet module
+            from ..graspnet import GraspNetBaseLine
 
             self._graspnet = GraspNetBaseLine(
                 checkpoint_path=self.checkpoint_path,

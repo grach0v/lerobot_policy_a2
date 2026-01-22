@@ -21,10 +21,12 @@ dependencies = [
     "tqdm",
     "packaging",
     "torchvision>=0.15.0",
-    "pybullet>=3.2.5",
 ]
 
 [project.optional-dependencies]
+graspnet = ["graspnetAPI>=1.2.11"]
+sim = ["pybullet>=3.2.5"]
+all = ["lerobot_policy_a2[graspnet,sim]"]
 dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
@@ -37,8 +39,23 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/lerobot_policy_a2"]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
+]
+
+[tool.uv]
+# Override deprecated/pinned dependencies from graspnetAPI
+override-dependencies = [
+    "sklearn ; python_version < '0'",  # deprecated, scikit-learn provides it
+    "numpy>=1.26.0,<3.0.0",
+    "transforms3d>=0.4.0",
+    "pillow>=10.0.0",
+    "scipy>=1.12.0",
+    "matplotlib>=3.8.0",
+    "opencv-python>=4.9.0",
+    "tqdm>=4.66.0",
+    "autolab-core>=1.1.0",
+    "trimesh>=4.0.0",
 ]
