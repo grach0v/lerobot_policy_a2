@@ -1,5 +1,6 @@
 """Neural network components for A2 Policy."""
 
+from .action_selection import CLIPGrasp, CLIPPlace
 from .clip_action import (
     CLIPActionFusion,
     CrossTransformer,
@@ -7,7 +8,6 @@ from .clip_action import (
     RotaryPositionEncoding,
     RotaryPositionEncoding3D,
 )
-from .action_selection import CLIPGrasp, CLIPPlace
 from .grasp_generator import GraspGenerator, create_grasp_generator
 from .place_generator import PlaceGenerator, create_place_generator
 

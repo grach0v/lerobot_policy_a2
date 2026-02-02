@@ -1,4 +1,5 @@
 """Action selection agents for grasp and place tasks."""
+
 import numpy as np
 import torch
 from sklearn.neighbors import NearestNeighbors
@@ -21,12 +22,9 @@ class CLIPGrasp:
 
         clip_pred_pts = torch.argmax(clip_sims)
         grasps = torch.where(pts_grasp_map[clip_pred_pts] == 1)[0]
-        if len(grasps) >= 1:
-            grasps = grasps[0]
-        else:
-            grasps = torch.randint(0, actions.shape[1], (1,))
+        grasps = grasps[0] if len(grasps) >= 1 else torch.randint(0, actions.shape[1], (1,))
 
-        return int(grasps.detach().cpu().numpy())
+        return int(grasps.detach().cpu().numpy().item())
 
     def select_action_greedy(self, pts: torch.Tensor, clip_sims: torch.Tensor, actions: torch.Tensor) -> int:
         """Select grasp action using greedy selection based on distance."""
@@ -43,7 +41,7 @@ class CLIPGrasp:
         else:
             grasps = torch.randint(0, actions.shape[1], (1,))
 
-        return int(grasps.detach().cpu().numpy())
+        return int(grasps.detach().cpu().numpy().item())
 
     def select_action_knn_greedy(
         self, pts: torch.Tensor, clip_sims: torch.Tensor, actions: torch.Tensor, M: int = 500
@@ -68,7 +66,7 @@ class CLIPGrasp:
         else:
             grasps = torch.randint(0, actions.shape[1], (1,))
 
-        return int(grasps.detach().cpu().numpy())
+        return int(grasps.detach().cpu().numpy().item())
 
 
 class CLIPPlace:
@@ -88,12 +86,9 @@ class CLIPPlace:
 
         clip_pred_pts = torch.argmax(clip_sims)
         places = torch.where(pts_place_map[clip_pred_pts] == 1)[0]
-        if len(places) >= 1:
-            places = places[0]
-        else:
-            places = torch.randint(0, actions.shape[1], (1,))
+        places = places[0] if len(places) >= 1 else torch.randint(0, actions.shape[1], (1,))
 
-        return int(places.detach().cpu().numpy())
+        return int(places.detach().cpu().numpy().item())
 
     def select_action_greedy(self, pts: torch.Tensor, clip_sims: torch.Tensor, actions: torch.Tensor) -> int:
         """Select place action using greedy selection based on distance."""
@@ -110,7 +105,7 @@ class CLIPPlace:
         else:
             places = torch.randint(0, actions.shape[1], (1,))
 
-        return int(places.detach().cpu().numpy())
+        return int(places.detach().cpu().numpy().item())
 
     def select_action_knn_greedy(
         self, pts: torch.Tensor, clip_sims: torch.Tensor, actions: torch.Tensor, M: int = 500
@@ -135,4 +130,4 @@ class CLIPPlace:
         else:
             places = torch.randint(0, actions.shape[1], (1,))
 
-        return int(places.detach().cpu().numpy())
+        return int(places.detach().cpu().numpy().item())

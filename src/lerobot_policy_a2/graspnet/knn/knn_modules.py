@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable, Function
 
 # Try to import CUDA knn, fall back to pure PyTorch
 try:
@@ -14,8 +13,7 @@ except ImportError:
 
 
 def knn(ref, query, k=1):
-    """ Compute k nearest neighbors for each query point.
-    """
+    """Compute k nearest neighbors for each query point."""
     device = ref.device
     ref = ref.float().to(device)
     query = query.float().to(device)

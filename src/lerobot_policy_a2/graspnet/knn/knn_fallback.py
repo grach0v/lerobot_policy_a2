@@ -25,7 +25,7 @@ def knn(ref: torch.Tensor, query: torch.Tensor, inds: torch.Tensor) -> None:
     # Compute squared distances: (B, M, N)
     # dist[b, m, n] = ||query[b, m] - ref[b, n]||^2
     diff = query_t.unsqueeze(2) - ref_t.unsqueeze(1)  # (B, M, N, C)
-    dist = torch.sum(diff ** 2, dim=-1)  # (B, M, N)
+    dist = torch.sum(diff**2, dim=-1)  # (B, M, N)
 
     # Get k smallest distances
     _, idx = torch.topk(dist, k, dim=-1, largest=False)  # (B, M, k)

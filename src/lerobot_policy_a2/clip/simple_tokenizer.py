@@ -1,4 +1,5 @@
 """Simple tokenizer for CLIP."""
+
 import gzip
 import html
 import os
@@ -8,15 +9,19 @@ import ftfy
 import regex as re
 
 
-@lru_cache()
+@lru_cache
 def default_bpe():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), "bpe_simple_vocab_16e6.txt.gz")
 
 
-@lru_cache()
+@lru_cache
 def bytes_to_unicode():
     """Returns list of utf-8 byte and a corresponding list of unicode strings."""
-    bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("¡"), ord("¬") + 1)) + list(range(ord("®"), ord("ÿ") + 1))
+    bs = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("¡"), ord("¬") + 1))
+        + list(range(ord("®"), ord("ÿ") + 1))
+    )
     cs = bs[:]
     n = 0
     for b in range(2**8):
@@ -25,7 +30,7 @@ def bytes_to_unicode():
             cs.append(2**8 + n)
             n += 1
     cs = [chr(n) for n in cs]
-    return dict(zip(bs, cs))
+    return dict(zip(bs, cs, strict=False))
 
 
 def get_pairs(word):
@@ -56,7 +61,8 @@ class SimpleTokenizer:
     def __init__(self, bpe_path: str = default_bpe()):
         self.byte_encoder = bytes_to_unicode()
         self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
-        merges = gzip.open(bpe_path).read().decode("utf-8").split("\n")
+        with gzip.open(bpe_path) as f:
+            merges = f.read().decode("utf-8").split("\n")
         merges = merges[1 : 49152 - 256 - 2 + 1]
         merges = [tuple(merge.split()) for merge in merges]
         vocab = list(bytes_to_unicode().values())
@@ -64,9 +70,9 @@ class SimpleTokenizer:
         for merge in merges:
             vocab.append("".join(merge))
         vocab.extend(["<|startoftext|>", "<|endoftext|>"])
-        self.encoder = dict(zip(vocab, range(len(vocab))))
+        self.encoder = dict(zip(vocab, range(len(vocab)), strict=False))
         self.decoder = {v: k for k, v in self.encoder.items()}
-        self.bpe_ranks = dict(zip(merges, range(len(merges))))
+        self.bpe_ranks = dict(zip(merges, range(len(merges)), strict=False))
         self.cache = {"<|startoftext|>": "<|startoftext|>", "<|endoftext|>": "<|endoftext|>"}
         self.pat = re.compile(
             r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+""",
@@ -124,5 +130,9 @@ class SimpleTokenizer:
 
     def decode(self, tokens):
         text = "".join([self.decoder[token] for token in tokens])
-        text = bytearray([self.byte_decoder[c] for c in text]).decode("utf-8", errors="replace").replace("</w>", " ")
+        text = (
+            bytearray([self.byte_decoder[c] for c in text])
+            .decode("utf-8", errors="replace")
+            .replace("</w>", " ")
+        )
         return text

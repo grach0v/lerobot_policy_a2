@@ -1,9 +1,9 @@
 """CLIP model loading and preprocessing utilities."""
+
 import hashlib
 import os
 import urllib
 import warnings
-from typing import List, Union
 
 import torch
 from packaging import version as packaging_version
@@ -22,7 +22,7 @@ except ImportError:
     BICUBIC = Image.BICUBIC
 
 if packaging_version.parse(torch.__version__) < packaging_version.parse("1.7.1"):
-    warnings.warn("PyTorch version 1.7.1 or higher is recommended")
+    warnings.warn("PyTorch version 1.7.1 or higher is recommended", stacklevel=2)
 
 __all__ = ["available_models", "load", "tokenize"]
 _tokenizer = _Tokenizer()
@@ -51,24 +51,37 @@ def _download(url: str, root: str):
         raise RuntimeError(f"{download_target} exists and is not a regular file")
 
     if os.path.isfile(download_target):
-        if hashlib.sha256(open(download_target, "rb").read()).hexdigest() == expected_sha256:
-            return download_target
-        else:
-            warnings.warn(f"{download_target} exists, but the SHA256 checksum does not match; re-downloading the file")
+        with open(download_target, "rb") as f:
+            if hashlib.sha256(f.read()).hexdigest() == expected_sha256:
+                return download_target
+        warnings.warn(
+            f"{download_target} exists, but the SHA256 checksum does not match; re-downloading the file",
+            stacklevel=2,
+        )
 
     print(f"Downloading CLIP model from {url}")
-    with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
-        with tqdm(total=int(source.info().get("Content-Length")), ncols=80, unit="iB", unit_scale=True, unit_divisor=1024) as loop:
-            while True:
-                buffer = source.read(8192)
-                if not buffer:
-                    break
+    with (
+        urllib.request.urlopen(url) as source,
+        open(download_target, "wb") as output,
+        tqdm(
+            total=int(source.info().get("Content-Length")),
+            ncols=80,
+            unit="iB",
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as loop,
+    ):
+        while True:
+            buffer = source.read(8192)
+            if not buffer:
+                break
 
-                output.write(buffer)
-                loop.update(len(buffer))
+            output.write(buffer)
+            loop.update(len(buffer))
 
-    if hashlib.sha256(open(download_target, "rb").read()).hexdigest() != expected_sha256:
-        raise RuntimeError("Model has been downloaded but the SHA256 checksum does not not match")
+    with open(download_target, "rb") as f:
+        if hashlib.sha256(f.read()).hexdigest() != expected_sha256:
+            raise RuntimeError("Model has been downloaded but the SHA256 checksum does not match")
 
     return download_target
 
@@ -89,7 +102,7 @@ def _transform(n_px):
     )
 
 
-def available_models() -> List[str]:
+def available_models() -> list[str]:
     """Returns the names of available CLIP models."""
     return list(_MODELS.keys())
 
@@ -99,7 +112,7 @@ TORCH_HUB_ROOT = os.path.expandvars(os.getenv("TORCH_HUB_ROOT", os.path.expandus
 
 def load(
     name: str,
-    device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
+    device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu",
     jit: bool = False,
     download_root: str = None,
 ):
@@ -140,7 +153,9 @@ def load(
             state_dict = None
         except RuntimeError:
             if jit:
-                warnings.warn(f"File {model_path} is not a JIT archive. Loading as a state dict instead")
+                warnings.warn(
+                    f"File {model_path} is not a JIT archive. Loading as a state dict instead", stacklevel=2
+                )
                 jit = False
             state_dict = torch.load(opened_file, map_location="cpu")
 
@@ -202,8 +217,8 @@ def load(
 
 
 def tokenize(
-    texts: Union[str, List[str]], context_length: int = 77, truncate: bool = False
-) -> Union[torch.IntTensor, torch.LongTensor]:
+    texts: str | list[str], context_length: int = 77, truncate: bool = False
+) -> torch.IntTensor | torch.LongTensor:
     """Returns the tokenized representation of given input string(s).
 
     Parameters

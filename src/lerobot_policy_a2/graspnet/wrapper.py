@@ -2,9 +2,11 @@
 
 This module wraps the GraspNet model for generating grasp candidates from point clouds.
 """
-from pathlib import Path
+
 import os
 import sys
+from pathlib import Path
+
 import numpy as np
 import open3d as o3d
 
@@ -17,20 +19,23 @@ import torch
 # Lazy import graspnetAPI (requires separate installation due to sklearn dependency)
 GraspGroup = None
 
+
 def _get_grasp_group():
     """Lazy import GraspGroup from graspnetAPI."""
     global GraspGroup
     if GraspGroup is None:
         try:
             from graspnetAPI import GraspGroup as _GraspGroup
+
             GraspGroup = _GraspGroup
-        except ImportError:
+        except ImportError as err:
             raise ImportError(
                 "graspnetAPI is not installed. Install with:\n"
                 "  SKLEARN_ALLOW_DEPRECATED_SKLEARN_PACKAGE_INSTALL=True pip install graspnetAPI\n"
                 "Or: pip install lerobot_policy_a2[graspnet]"
-            )
+            ) from err
     return GraspGroup
+
 
 # Add local paths for imports
 _ROOT = Path(__file__).parent
@@ -39,8 +44,8 @@ sys.path.insert(0, str(_ROOT / "models"))
 sys.path.insert(0, str(_ROOT / "pointnet2"))
 sys.path.insert(0, str(_ROOT / "utils"))
 
-from graspnet import GraspNet, pred_decode
 from collision_detector import ModelFreeCollisionDetector
+from graspnet import GraspNet, pred_decode
 
 # Default HuggingFace repo for GraspNet checkpoint
 DEFAULT_GRASPNET_REPO = "dgrachev/graspnet_checkpoint"
@@ -94,7 +99,7 @@ def get_graspnet_checkpoint(
                 return str(alt_path)
         raise FileNotFoundError(
             f"GraspNet checkpoint not found. Please download manually or upload to {repo_id}"
-        )
+        ) from e
 
 
 class GraspNetBaseLine:
@@ -153,9 +158,7 @@ class GraspNetBaseLine:
             idxs = np.random.choice(len(cloud_masked), self.num_point, replace=False)
         else:
             idxs1 = np.arange(len(cloud_masked))
-            idxs2 = np.random.choice(
-                len(cloud_masked), self.num_point - len(cloud_masked), replace=True
-            )
+            idxs2 = np.random.choice(len(cloud_masked), self.num_point - len(cloud_masked), replace=True)
             idxs = np.concatenate([idxs1, idxs2], axis=0)
         cloud_sampled = cloud_masked[idxs]
         color_sampled = color_masked[idxs]
@@ -164,7 +167,7 @@ class GraspNetBaseLine:
         cloud.points = o3d.utility.Vector3dVector(cloud_masked.astype(np.float32))
         cloud.colors = o3d.utility.Vector3dVector(color_masked.astype(np.float32))
 
-        end_points = dict()
+        end_points = {}
         cloud_sampled = torch.from_numpy(cloud_sampled[np.newaxis].astype(np.float32))
         cloud_sampled = cloud_sampled.to(self.device)
         end_points["point_clouds"] = cloud_sampled

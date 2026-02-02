@@ -2,9 +2,8 @@
 
 This module wraps GraspNet for generating candidate grasp poses from point clouds.
 """
+
 import copy
-from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import open3d as o3d
@@ -23,15 +22,15 @@ class GraspGenerator:
 
     def __init__(
         self,
-        checkpoint_path: Optional[str] = None,
+        checkpoint_path: str | None = None,
         num_point: int = 20000,
         num_view: int = 300,
         collision_thresh: float = 0.001,
         empty_thresh: float = 0.15,
         voxel_size: float = 0.01,
-        dist_thresh: float = 0.15,
-        angle_thresh: float = 70.0,
-        refine_approach_dist: float = 0.04,
+        dist_thresh: float = 0.05,
+        angle_thresh: float = 15.0,
+        refine_approach_dist: float = 0.01,
         device: str = "cuda",
     ):
         self.num_point = num_point
@@ -71,7 +70,7 @@ class GraspGenerator:
             self._graspnet = None
 
     def generate_grasps(
-        self, point_cloud: np.ndarray, colors: Optional[np.ndarray] = None
+        self, point_cloud: np.ndarray, colors: np.ndarray | None = None
     ) -> tuple[list[np.ndarray], np.ndarray]:
         """Generate candidate grasp poses from point cloud.
 
@@ -133,7 +132,13 @@ class GraspGenerator:
         for i in range(len(gg)):
             grasp_rotation_matrix = eelink_rs[i]
             # Ensure right-hand coordinate system
-            if np.linalg.norm(np.cross(grasp_rotation_matrix[:, 0], grasp_rotation_matrix[:, 1]) - grasp_rotation_matrix[:, 2]) > 0.1:
+            if (
+                np.linalg.norm(
+                    np.cross(grasp_rotation_matrix[:, 0], grasp_rotation_matrix[:, 1])
+                    - grasp_rotation_matrix[:, 2]
+                )
+                > 0.1
+            ):
                 grasp_rotation_matrix[:, 0] = -grasp_rotation_matrix[:, 0]
 
             grasp_pose = np.zeros(7)
@@ -144,7 +149,9 @@ class GraspGenerator:
 
         return grasp_poses
 
-    def _generate_random_grasps(self, point_cloud: np.ndarray, num_grasps: int = 100) -> tuple[list[np.ndarray], None]:
+    def _generate_random_grasps(
+        self, point_cloud: np.ndarray, num_grasps: int = 100
+    ) -> tuple[list[np.ndarray], None]:
         """Generate random grasp poses as fallback."""
         grasp_poses = []
 
@@ -167,6 +174,6 @@ class GraspGenerator:
         return grasp_poses, None
 
 
-def create_grasp_generator(checkpoint_path: Optional[str] = None, **kwargs) -> GraspGenerator:
+def create_grasp_generator(checkpoint_path: str | None = None, **kwargs) -> GraspGenerator:
     """Factory function to create grasp generator."""
     return GraspGenerator(checkpoint_path=checkpoint_path, **kwargs)

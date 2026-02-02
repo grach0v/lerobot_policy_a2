@@ -1,6 +1,6 @@
 """Configuration for A2 Policy (ViLGP3D)."""
+
 from dataclasses import dataclass, field
-from typing import Optional
 
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.configs.types import NormalizationMode
@@ -45,11 +45,20 @@ class A2Config(PreTrainedConfig):
     fusion_sa: bool = False
     no_rgb_feat: bool = False
 
+    # Workspace shift: shift points/actions to center workspace around y=0
+    # Only used for pickplace task, NOT for standalone grasp/place
+    workspace_shift: bool = False
+
+    # Direct grounding mode: use simple CLIP-based selection instead of learned networks
+    # When True, uses select_action_knn_greedy for CLIP-based grasp/place selection
+    # When False, uses learned vilg_fusion + policy networks
+    direct_grounding: bool = True
+
     # GraspNet checkpoint path
-    graspnet_checkpoint: Optional[str] = None
+    graspnet_checkpoint: str | None = None
 
     # Device
-    device: Optional[str] = None
+    device: str | None = None
 
     # Normalization mapping for different modalities
     # A2 uses IDENTITY (no normalization) by default since it operates on raw poses

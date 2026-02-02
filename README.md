@@ -39,6 +39,32 @@ cd lerobot_policy_a2
 pip install -e .
 ```
 
+### GPU Acceleration (PointNet2 CUDA Extension)
+
+For higher grasp success rates on modern GPUs (RTX 40/50 series), build the PointNet2 CUDA extension used by GraspNet.
+
+```bash
+# Install CUDA toolkit (nvcc)
+sudo apt-get update
+sudo apt-get install -y nvidia-cuda-toolkit
+
+# Build the PointNet2 extension (from repo root)
+# If nvcc >= 12.8 is available, use TORCH_CUDA_ARCH_LIST=12.0
+# Otherwise use a PTX build that can JIT on newer GPUs (slower): 9.0+PTX
+cd src/lerobot_policy_a2/graspnet/pointnet2
+TORCH_CUDA_ARCH_LIST=9.0+PTX uv run python setup.py build_ext --inplace
+cd ../../../..
+```
+
+Verify that the CUDA extension is active (no fallback):
+
+```bash
+uv run python - <<'PY'
+from lerobot_policy_a2.graspnet.pointnet2 import pointnet2_utils
+print(f"pointnet2_fallback={pointnet2_utils._USE_FALLBACK}")
+PY
+```
+
 ## Quick Start
 
 ### Load Pretrained Model from HuggingFace

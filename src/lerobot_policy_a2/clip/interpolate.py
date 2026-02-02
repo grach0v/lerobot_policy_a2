@@ -1,4 +1,5 @@
 """Positional embedding interpolation for CLIP."""
+
 import numpy as np
 import torch
 
@@ -37,9 +38,9 @@ def interpolate_positional_embedding(
         align_corners=False,
         recompute_scale_factor=False,
     )
-    assert (
-        int(w0) == patch_pos_embed_interp.shape[-2] and int(h0) == patch_pos_embed_interp.shape[-1]
-    ), "Interpolation error."
+    assert int(w0) == patch_pos_embed_interp.shape[-2] and int(h0) == patch_pos_embed_interp.shape[-1], (
+        "Interpolation error."
+    )
 
     patch_pos_embed_interp = patch_pos_embed_interp.permute(0, 2, 3, 1).reshape(-1, dim)
     pos_embed_interp = torch.cat([class_pos_embed, patch_pos_embed_interp], dim=0)

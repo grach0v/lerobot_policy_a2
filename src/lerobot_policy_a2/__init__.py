@@ -9,20 +9,17 @@ Can be used standalone or as a LeRobot policy plugin.
 # Ensure lerobot is installed for plugin functionality
 try:
     import lerobot  # noqa: F401
-except ImportError:
+except ImportError as err:
     raise ImportError(
         "lerobot is not installed. Please install lerobot to use this policy package. "
         "Install with: pip install lerobot"
-    )
+    ) from err
 
+# Also expose submodules for advanced usage
+from . import clip, graspnet, networks
 from .configuration_a2 import A2Config
 from .modeling_a2 import A2Policy
 from .processor_a2 import make_a2_pre_post_processors
-
-# Also expose submodules for advanced usage
-from . import clip
-from . import networks
-from . import graspnet
 
 __all__ = [
     "A2Config",

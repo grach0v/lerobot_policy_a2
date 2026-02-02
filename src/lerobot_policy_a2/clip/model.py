@@ -1,6 +1,6 @@
 """CLIP model implementation."""
+
 from collections import OrderedDict
-from typing import Tuple, Union
 
 import numpy as np
 import torch
@@ -205,7 +205,9 @@ class ResidualAttentionBlock(nn.Module):
         self.attn_mask = attn_mask
 
     def attention(self, x: torch.Tensor):
-        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        self.attn_mask = (
+            self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        )
         return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
     def forward_v(self, x: torch.Tensor):
@@ -228,22 +230,30 @@ class Transformer(nn.Module):
         super().__init__()
         self.width = width
         self.layers = layers
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)])
+        self.resblocks = nn.Sequential(
+            *[ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)]
+        )
 
     def forward(self, x: torch.Tensor):
         return self.resblocks(x)
 
 
 class VisionTransformer(nn.Module):
-    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
+    def __init__(
+        self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int
+    ):
         super().__init__()
         self.input_resolution = input_resolution
         self.output_dim = output_dim
-        self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
+        self.conv1 = nn.Conv2d(
+            in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False
+        )
 
         scale = width**-0.5
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
-        self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
+        self.positional_embedding = nn.Parameter(
+            scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width)
+        )
         self.ln_pre = LayerNorm(width)
 
         self.transformer = Transformer(width, layers, heads)
@@ -267,7 +277,9 @@ class VisionTransformer(nn.Module):
             ],
             dim=1,
         )
-        x = x + interpolate_positional_embedding(self.positional_embedding, x, patch_size=self.patch_size, w=w, h=h)
+        x = x + interpolate_positional_embedding(
+            self.positional_embedding, x, patch_size=self.patch_size, w=w, h=h
+        )
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)
@@ -302,7 +314,7 @@ class CLIP(nn.Module):
         self,
         embed_dim: int,
         image_resolution: int,
-        vision_layers: Union[Tuple[int, int, int, int], int],
+        vision_layers: tuple[int, int, int, int] | int,
         vision_width: int,
         vision_patch_size: int,
         context_length: int,
@@ -364,7 +376,12 @@ class CLIP(nn.Module):
                 nn.init.normal_(self.visual.attnpool.v_proj.weight, std=std)
                 nn.init.normal_(self.visual.attnpool.c_proj.weight, std=std)
 
-            for resnet_block in [self.visual.layer1, self.visual.layer2, self.visual.layer3, self.visual.layer4]:
+            for resnet_block in [
+                self.visual.layer1,
+                self.visual.layer2,
+                self.visual.layer3,
+                self.visual.layer4,
+            ]:
                 for name, param in resnet_block.named_parameters():
                     if name.endswith("bn3.weight"):
                         nn.init.zeros_(param)
@@ -439,7 +456,12 @@ def convert_weights(model: nn.Module):
                 l.bias.data = l.bias.data.half()
 
         if isinstance(l, nn.MultiheadAttention):
-            for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:
+            for attr in [
+                *[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]],
+                "in_proj_bias",
+                "bias_k",
+                "bias_v",
+            ]:
                 tensor = getattr(l, attr)
                 if tensor is not None:
                     tensor.data = tensor.data.half()
@@ -459,14 +481,15 @@ def build_model(state_dict: dict):
     if vit:
         vision_width = state_dict["visual.conv1.weight"].shape[0]
         vision_layers = len(
-            [k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")]
+            [k for k in state_dict if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")]
         )
         vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
         grid_size = round((state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5)
         image_resolution = vision_patch_size * grid_size
     else:
         counts: list = [
-            len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}"))) for b in [1, 2, 3, 4]
+            len({k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}")})
+            for b in [1, 2, 3, 4]
         ]
         vision_layers = tuple(counts)
         vision_width = state_dict["visual.layer1.0.conv1.weight"].shape[0]
@@ -480,7 +503,7 @@ def build_model(state_dict: dict):
     vocab_size = state_dict["token_embedding.weight"].shape[0]
     transformer_width = state_dict["ln_final.weight"].shape[0]
     transformer_heads = transformer_width // 64
-    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith("transformer.resblocks")))
+    transformer_layers = len({k.split(".")[2] for k in state_dict if k.startswith("transformer.resblocks")})
 
     model = CLIP(
         embed_dim,

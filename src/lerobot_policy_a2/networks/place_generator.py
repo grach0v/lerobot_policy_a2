@@ -2,7 +2,6 @@
 
 This module generates candidate place poses based on object locations and spatial relations.
 """
-from typing import Optional
 
 import numpy as np
 from scipy.spatial.transform import Rotation as R
@@ -19,7 +18,7 @@ class PlaceGenerator:
 
     def __init__(
         self,
-        workspace_limits: Optional[np.ndarray] = None,
+        workspace_limits: np.ndarray | None = None,
         pixel_size: float = 0.002,
         image_size: int = 224,
         min_dist: float = 0.02,
@@ -36,7 +35,7 @@ class PlaceGenerator:
         depth: np.ndarray,
         obj_centers: list[tuple[int, int]],
         obj_sizes: list[tuple[int, int]],
-        ref_obj_centers: Optional[list[tuple[int, int]]] = None,
+        ref_obj_centers: list[tuple[int, int]] | None = None,
         sample_num_each_object: int = 5,
         topdown_place_rot: bool = True,
     ) -> tuple[np.ndarray, list[np.ndarray], list[int]]:
@@ -58,7 +57,7 @@ class PlaceGenerator:
         sample_inds = None
         valid_places_list = []
 
-        for i, (center, size) in enumerate(zip(obj_centers, obj_sizes)):
+        for _i, (center, size) in enumerate(zip(obj_centers, obj_sizes, strict=False)):
             # Generate samples inside object region
             in_samples = self._generate_in_region_samples(center, size, sample_num_each_object)
             if in_samples is not None:
@@ -92,7 +91,7 @@ class PlaceGenerator:
 
     def _generate_in_region_samples(
         self, center: tuple[int, int], size: tuple[int, int], num_samples: int
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """Generate samples inside object bounding box."""
         cx, cy = center
         sx, sy = size
@@ -113,7 +112,7 @@ class PlaceGenerator:
         size: tuple[int, int],
         num_samples: int,
         img_shape: tuple[int, int],
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """Generate samples around object bounding box."""
         cx, cy = center
         sx, sy = size

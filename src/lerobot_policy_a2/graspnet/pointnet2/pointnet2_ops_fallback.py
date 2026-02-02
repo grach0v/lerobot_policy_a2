@@ -8,8 +8,6 @@ Based on:
 """
 
 import torch
-import torch.nn as nn
-from typing import Tuple, Optional
 
 
 def square_distance(src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
@@ -26,8 +24,8 @@ def square_distance(src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
     B, N, _ = src.shape
     _, M, _ = dst.shape
     dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
-    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
+    dist += torch.sum(src**2, -1).view(B, N, 1)
+    dist += torch.sum(dst**2, -1).view(B, 1, M)
     return dist
 
 
@@ -108,7 +106,7 @@ def query_ball_point(radius: float, nsample: int, xyz: torch.Tensor, new_xyz: to
 
     group_idx = torch.arange(N, dtype=torch.long, device=device).view(1, 1, N).repeat([B, S, 1])
     sqrdists = square_distance(new_xyz, xyz)
-    group_idx[sqrdists > radius ** 2] = N
+    group_idx[sqrdists > radius**2] = N
     group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
 
     # Fill with first point if not enough neighbors
@@ -119,7 +117,7 @@ def query_ball_point(radius: float, nsample: int, xyz: torch.Tensor, new_xyz: to
     return group_idx
 
 
-def knn_query(k: int, xyz: torch.Tensor, new_xyz: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def knn_query(k: int, xyz: torch.Tensor, new_xyz: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     K-nearest neighbors query.
 
@@ -137,7 +135,7 @@ def knn_query(k: int, xyz: torch.Tensor, new_xyz: torch.Tensor) -> Tuple[torch.T
     return dist, idx
 
 
-def three_nn(unknown: torch.Tensor, known: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+def three_nn(unknown: torch.Tensor, known: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Find 3 nearest neighbors.
 
@@ -166,7 +164,7 @@ def three_interpolate(features: torch.Tensor, idx: torch.Tensor, weight: torch.T
         interpolated: (B, C, N) interpolated features
     """
     B, C, M = features.shape
-    N = idx.shape[1]
+    idx.shape[1]
 
     # (B, N, 3, C)
     indexed = index_points(features.permute(0, 2, 1), idx)
@@ -237,6 +235,7 @@ def cuda_available() -> bool:
     """Check if CUDA PointNet2 extensions are available."""
     try:
         import pointnet2._ext
+
         return True
     except ImportError:
         return False
@@ -246,7 +245,7 @@ def get_device_type(tensor: torch.Tensor) -> str:
     """Get device type string."""
     if tensor.is_cuda:
         return "cuda"
-    elif hasattr(tensor, 'is_mps') and tensor.is_mps:
+    elif hasattr(tensor, "is_mps") and tensor.is_mps:
         return "mps"
     else:
         return "cpu"
@@ -259,7 +258,7 @@ def cylinder_query(
     nsample: int,
     xyz: torch.Tensor,
     new_xyz: torch.Tensor,
-    rot: torch.Tensor
+    rot: torch.Tensor,
 ) -> torch.Tensor:
     """
     Cylinder query - find points within cylinder.
@@ -299,7 +298,7 @@ def cylinder_query(
             # Height along x-axis in local frame
             h = pts_local[:, 0]
             # Radius in yz-plane
-            r = torch.sqrt(pts_local[:, 1]**2 + pts_local[:, 2]**2)
+            r = torch.sqrt(pts_local[:, 1] ** 2 + pts_local[:, 2] ** 2)
 
             mask = (h >= hmin) & (h <= hmax) & (r <= radius)
             valid_idx = torch.where(mask)[0]
@@ -319,9 +318,9 @@ def cylinder_query(
 
 # Print warning on import
 import sys
+
 if not cuda_available():
     print(
-        "Note: Using pure PyTorch fallback for PointNet2 ops. "
-        "This is slower than CUDA but works on CPU/MPS.",
-        file=sys.stderr
+        "Note: Using pure PyTorch fallback for PointNet2 ops. This is slower than CUDA but works on CPU/MPS.",
+        file=sys.stderr,
     )

@@ -5,8 +5,9 @@ This module contains the core network components for the ViLGP3D policy:
 - Policy: MLP head for action scoring
 - Position embeddings: Sinusoidal and Rotary Position Encoding
 """
-from collections import OrderedDict
+
 import math
+from collections import OrderedDict
 
 import torch
 import torch.nn as nn
@@ -102,9 +103,8 @@ class RotaryPositionEncoding(nn.Module):
         sinx = torch.sin(x_position * div_term)
         cosx = torch.cos(x_position * div_term)
 
-        sin_pos, cos_pos = map(
-            lambda feat: torch.stack([feat, feat], dim=-1).view(bsize, npoint, -1),
-            [sinx, cosx],
+        sin_pos, cos_pos = (
+            torch.stack([feat, feat], dim=-1).view(bsize, npoint, -1) for feat in [sinx, cosx]
         )
         position_code = torch.stack([cos_pos, sin_pos], dim=-1)
 
@@ -146,9 +146,9 @@ class RotaryPositionEncoding3D(RotaryPositionEncoding):
         sinz = torch.sin(z_position * div_term)
         cosz = torch.cos(z_position * div_term)
 
-        sinx, cosx, siny, cosy, sinz, cosz = map(
-            lambda feat: torch.stack([feat, feat], -1).view(bsize, npoint, -1),
-            [sinx, cosx, siny, cosy, sinz, cosz],
+        sinx, cosx, siny, cosy, sinz, cosz = (
+            torch.stack([feat, feat], -1).view(bsize, npoint, -1)
+            for feat in [sinx, cosx, siny, cosy, sinz, cosz]
         )
 
         position_code = torch.stack(
@@ -500,24 +500,20 @@ class CLIPActionFusion(nn.Module):
         # Add task embedding
         if mode is not None and hasattr(self, "task_embedding"):
             if mode == "grasp":
-                task_feat = self.task_embedding(
-                    torch.LongTensor([1]).to(self.device)
-                ).repeat(action_feat.shape[0], 1, 1)
+                task_feat = self.task_embedding(torch.LongTensor([1]).to(self.device)).repeat(
+                    action_feat.shape[0], 1, 1
+                )
             elif mode == "place":
-                task_feat = self.task_embedding(
-                    torch.LongTensor([2]).to(self.device)
-                ).repeat(action_feat.shape[0], 1, 1)
+                task_feat = self.task_embedding(torch.LongTensor([2]).to(self.device)).repeat(
+                    action_feat.shape[0], 1, 1
+                )
             action_feat = action_feat + task_feat
 
         # Cross-attention
         if not self.no_rgb_feat:
-            cross_feat, attn_weights = self.cross_attn(
-                q=action_feat, k=pts_pos_feat, v=pts_sim_feat
-            )
+            cross_feat, attn_weights = self.cross_attn(q=action_feat, k=pts_pos_feat, v=pts_sim_feat)
         else:
-            cross_feat, attn_weights = self.cross_attn(
-                q=action_feat, k=pts_pos_feat, v=pts_pos_feat
-            )
+            cross_feat, attn_weights = self.cross_attn(q=action_feat, k=pts_pos_feat, v=pts_pos_feat)
 
         # Self-attention
         if self.sa:
