@@ -7,6 +7,7 @@ and extracting features at the projected pixel locations.
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchvision.transforms.functional import resize, InterpolationMode
 
 
 def project_points_to_camera(
@@ -185,13 +186,13 @@ class FeatureField:
 
                     grid = image[:, y_start:y_end, x_start:x_end]
 
-                    # Resize to CLIP input size
-                    grid = F.interpolate(
-                        grid.unsqueeze(0),
-                        size=(input_res, input_res),
-                        mode='bilinear',
-                        align_corners=False
-                    )
+                    # Resize to CLIP input size using BICUBIC (matching PIL BICUBIC from original A2)
+                    grid = resize(
+                        grid,
+                        [input_res, input_res],
+                        interpolation=InterpolationMode.BICUBIC,
+                        antialias=True
+                    ).unsqueeze(0)
 
                     # Normalize for CLIP
                     grid = (grid - mean) / std
@@ -223,13 +224,13 @@ class FeatureField:
             features = features.permute(2, 0, 1)  # (D, fH, fW)
 
         else:
-            # Simple single-scale extraction
-            img = F.interpolate(
-                image.unsqueeze(0),
-                size=(input_res, input_res),
-                mode='bilinear',
-                align_corners=False
-            )
+            # Simple single-scale extraction using BICUBIC (matching PIL BICUBIC from original A2)
+            img = resize(
+                image,
+                [input_res, input_res],
+                interpolation=InterpolationMode.BICUBIC,
+                antialias=True
+            ).unsqueeze(0)
 
             # Normalize for CLIP
             img = (img - mean) / std

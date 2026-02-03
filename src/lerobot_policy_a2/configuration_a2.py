@@ -52,7 +52,8 @@ class A2Config(PreTrainedConfig):
     # Direct grounding mode: use simple CLIP-based selection instead of learned networks
     # When True, uses select_action_knn_greedy for CLIP-based grasp/place selection
     # When False, uses learned vilg_fusion + policy networks
-    direct_grounding: bool = True
+    # IMPORTANT: Pretrained models require direct_grounding=False to use learned networks
+    direct_grounding: bool = False
 
     # GraspNet checkpoint path
     graspnet_checkpoint: str | None = None
