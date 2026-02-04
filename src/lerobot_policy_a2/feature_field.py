@@ -72,6 +72,10 @@ def interpolate_features(
 ) -> torch.Tensor:
     """Bilinearly interpolate features at 2D coordinates.
 
+    Matches original A2 interpolate_feats function exactly:
+    - Uses (W-1) and (H-1) for normalization (with align_corners=True)
+    - grid_sample automatically rescales from image coords to feature map
+
     Args:
         feature_map: (C, H, W) feature map
         coords_2d: (N, 2) pixel coordinates (x, y)
@@ -84,16 +88,13 @@ def interpolate_features(
     H, W = image_size
     N = coords_2d.shape[0]
 
-    # Scale coordinates to feature map size
-    scale_x = fW / W
-    scale_y = fH / H
-
     # Normalize coordinates to [-1, 1] for grid_sample
-    coords_normalized = coords_2d.clone()
-    coords_normalized[:, 0] = coords_normalized[:, 0] * scale_x
-    coords_normalized[:, 1] = coords_normalized[:, 1] * scale_y
-    coords_normalized[:, 0] = 2.0 * coords_normalized[:, 0] / fW - 1.0
-    coords_normalized[:, 1] = 2.0 * coords_normalized[:, 1] / fH - 1.0
+    # CRITICAL: Use (W-1) and (H-1) to match original A2 formula exactly
+    # With align_corners=True: pixel 0 -> -1, pixel W-1 -> +1
+    # Original A2: x_norm = points[:, :, 0] / (w - 1) * 2 - 1
+    x_norm = coords_2d[:, 0] / (W - 1) * 2 - 1
+    y_norm = coords_2d[:, 1] / (H - 1) * 2 - 1
+    coords_normalized = torch.stack([x_norm, y_norm], dim=-1)  # (N, 2)
 
     # Reshape for grid_sample: (1, 1, N, 2)
     grid = coords_normalized.view(1, 1, N, 2)
@@ -102,7 +103,7 @@ def interpolate_features(
     # Reshape feature map: (1, C, fH, fW) -> (1, C, 1, N) via reshape
     feature_map = feature_map.unsqueeze(0)  # (1, C, fH, fW)
 
-    # Sample features
+    # Sample features (matches original A2 parameters)
     sampled = F.grid_sample(
         feature_map,
         grid,
@@ -164,16 +165,30 @@ class FeatureField:
 
         if use_multiscale and H >= 240 and W >= 320:
             # Multi-scale extraction: split image into grid cells
-            # This matches the original A2 approach for higher resolution
-            row_size = 240  # Height of each grid cell
-            column_size = 320  # Width of each grid cell
-            row_grid_num = max(1, H // row_size)
-            column_grid_num = max(1, W // column_size)
+            # CRITICAL: Must match original A2 grid parameters exactly!
+            # Original A2 uses: row_size = H/3, column_size = W/4
+            row_size = H // 3  # Height of each grid cell
+            column_size = W // 4  # Width of each grid cell
+            row_grid_num = 3  # Always 3 rows
+            column_grid_num = 4  # Always 4 columns
 
-            # Patches per grid cell after CLIP processing
-            patch_h = input_res // patch_size  # 24 patches
-            # Adjust patch_w for aspect ratio
-            patch_w = int(column_size / row_size * input_res // patch_size)
+            # CRITICAL: Original A2 uses T.Resize(input_res) with single int, which:
+            # 1. Resizes smallest edge to input_res while PRESERVING ASPECT RATIO
+            # 2. This means non-square grid cells stay non-square after resize!
+            # Original formula: patch_w = int(column_size / row_size * input_res // 14)
+            patch_h = input_res // patch_size  # 24 for 336/14
+            # Aspect ratio preserved: if column_size > row_size, patch_w > patch_h
+            aspect_ratio = column_size / row_size
+            patch_w = int(aspect_ratio * input_res // patch_size)
+
+            # Compute actual resize dimensions (preserve aspect ratio)
+            # Resize so that the smaller dimension becomes input_res
+            if row_size <= column_size:
+                resize_h = input_res
+                resize_w = int(column_size / row_size * input_res)
+            else:
+                resize_w = input_res
+                resize_h = int(row_size / column_size * input_res)
 
             grids = []
             for i in range(row_grid_num):
@@ -186,10 +201,10 @@ class FeatureField:
 
                     grid = image[:, y_start:y_end, x_start:x_end]
 
-                    # Resize to CLIP input size using BICUBIC (matching PIL BICUBIC from original A2)
+                    # Resize preserving aspect ratio (matching original A2's T.Resize(input_res))
                     grid = resize(
                         grid,
-                        [input_res, input_res],
+                        [resize_h, resize_w],
                         interpolation=InterpolationMode.BICUBIC,
                         antialias=True
                     ).unsqueeze(0)
@@ -199,13 +214,13 @@ class FeatureField:
                     grids.append(grid)
 
             # Process all grids in batch
-            grids_batch = torch.cat(grids, dim=0)  # (n_grids, 3, input_res, input_res)
+            grids_batch = torch.cat(grids, dim=0)  # (n_grids, 3, resize_h, resize_w)
 
             with torch.no_grad():
                 grid_features = self._clip_model.get_patch_encodings(grids_batch)  # (n_grids, N_patches, D)
 
-            # Reshape each grid's features
-            grid_features = grid_features.reshape(len(grids), patch_h, patch_h, feat_dim)
+            # Reshape each grid's features (non-square if aspect ratio != 1)
+            grid_features = grid_features.reshape(len(grids), patch_h, patch_w, feat_dim)
 
             # Stitch grids back together
             all_row_features = []
@@ -246,8 +261,9 @@ class FeatureField:
             features = patch_features.view(1, spatial_size, spatial_size, -1)  # (1, H, W, D)
             features = features.permute(0, 3, 1, 2).squeeze(0)  # (D, H, W)
 
-        # Normalize features
-        features = features / (features.norm(dim=0, keepdim=True) + 1e-6)
+        # NOTE: Do NOT normalize here! Original A2 returns raw features.
+        # Normalization is done later only when computing similarity.
+        # The network expects raw (unnormalized) features.
 
         return features.float()
 
@@ -281,7 +297,12 @@ class FeatureField:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute per-point CLIP features from multi-view images.
 
-        Uses depth-weighted fusion when depth images are available, similar to original A2.
+        CRITICAL: Matches original A2 flow exactly:
+        1. For each camera, compute dense features AND dense similarity map
+        2. Interpolate BOTH features and similarity at projected points
+        3. Fuse both across views using depth-weighted averaging
+
+        This is different from computing similarity after fusion!
 
         Args:
             points: (N, 3) point cloud in world coordinates
@@ -300,12 +321,13 @@ class FeatureField:
         # ViT-L/14@336px outputs 768-dim features (matches the network)
         D = 768  # CLIP ViT-L/14@336px output dimension
 
-        # Compute text features
+        # Compute text features once (will be used for similarity computation per camera)
         text_features = self.compute_text_features(lang_goal)  # (D,)
 
-        # Accumulate weighted features across views
+        # Accumulate weighted features AND similarity across views
         all_features = torch.zeros(N, D, device=self.device)
-        weight_sum = torch.zeros(N, 1, device=self.device)
+        all_similarity = torch.zeros(N, device=self.device)
+        valid_count = torch.zeros(N, 1, device=self.device)  # Count of valid views
 
         # Distance threshold for weighting (mu parameter from original A2)
         mu = 0.02  # 2cm threshold
@@ -349,20 +371,40 @@ class FeatureField:
 
             dense_features = self.extract_dense_features(img_tensor)  # (D, fH, fW)
 
+            # CRITICAL: Compute dense similarity map BEFORE interpolation (matches original A2)
+            # Original A2: color_embs = features / features.norm(dim=-1, keepdim=True)
+            #              sims = color_embs @ text_embs.T
+            # dense_features is (D, fH, fW), need to compute similarity per spatial location
+            fD, fH, fW = dense_features.shape
+            dense_features_spatial = dense_features.permute(1, 2, 0)  # (fH, fW, D)
+            # Normalize features for similarity computation (cosine similarity)
+            # Note: dense_features are RAW (not normalized), normalization is only for similarity
+            dense_features_norm = dense_features_spatial / (dense_features_spatial.norm(dim=-1, keepdim=True) + 1e-6)
+            # Compute similarity: (fH, fW, D) @ (D, 1) -> (fH, fW, 1)
+            dense_similarity = dense_features_norm @ text_features.unsqueeze(1)  # (fH, fW, 1)
+            dense_similarity = dense_similarity.squeeze(-1)  # (fH, fW)
+            # Reshape for interpolation: (1, fH, fW)
+            dense_similarity = dense_similarity.unsqueeze(0)  # (1, fH, fW)
+
             # Interpolate features at projected points
             coords_tensor = torch.from_numpy(coords_2d).float().to(self.device)
             point_features = interpolate_features(dense_features, coords_tensor, (H, W))  # (N, D)
+
+            # Interpolate similarity at projected points (CRITICAL: separate from features!)
+            point_similarity = interpolate_features(dense_similarity, coords_tensor, (H, W))  # (N, 1)
+            point_similarity = point_similarity.squeeze(1)  # (N,)
 
             # Compute distance-based weights if depth is available
             if depth_images is not None and cam_name in depth_images and depth_images[cam_name] is not None:
                 depth_img = depth_images[cam_name]
 
                 # Interpolate surface depth at projected points
+                # Use nearest mode and align_corners=True to match original A2
                 depth_tensor = torch.from_numpy(depth_img).float().unsqueeze(0).to(self.device)  # (1, H, W)
                 coords_for_depth = coords_tensor.clone()
-                # Normalize coords to [-1, 1]
-                coords_for_depth[:, 0] = 2.0 * coords_for_depth[:, 0] / (W - 1) - 1.0
-                coords_for_depth[:, 1] = 2.0 * coords_for_depth[:, 1] / (H - 1) - 1.0
+                # Normalize coords to [-1, 1] using same formula as original
+                coords_for_depth[:, 0] = coords_for_depth[:, 0] / (W - 1) * 2 - 1
+                coords_for_depth[:, 1] = coords_for_depth[:, 1] / (H - 1) * 2 - 1
                 grid = coords_for_depth.view(1, 1, N, 2)
 
                 surface_depth = F.grid_sample(
@@ -375,35 +417,47 @@ class FeatureField:
 
                 pts_depth_tensor = torch.from_numpy(pts_depth).float().to(self.device)
 
-                # Distance to surface
+                # Distance to surface (original A2: dist = inter_depth - pts_depth)
                 dist = surface_depth - pts_depth_tensor  # (N,)
 
-                # Valid points: have valid depth and distance within threshold
-                depth_valid = (surface_depth > 0.001) & (dist > -mu)
-                valid_tensor = torch.from_numpy(valid_mask).to(self.device) & depth_valid
+                # Valid points mask (matches original A2 exactly):
+                # dist_valid = (inter_depth > -0.0001) & valid_mask & (dist > -self.mu)
+                valid_tensor = torch.from_numpy(valid_mask).to(self.device)
+                dist_valid = (surface_depth > -0.0001) & valid_tensor & (dist > -mu)
 
                 # Distance-based weight (exponential decay from original A2)
                 dist_weight = torch.exp(torch.clamp(mu - torch.abs(dist), max=0) / mu)  # (N,)
-                dist_weight = dist_weight * valid_tensor.float()
 
             else:
                 # No depth: use uniform weights for valid points
                 valid_tensor = torch.from_numpy(valid_mask).to(self.device)
-                dist_weight = valid_tensor.float()
+                dist_valid = valid_tensor
+                dist_weight = torch.ones(N, device=self.device)
 
-            # Accumulate weighted features
-            all_features += point_features * dist_weight.unsqueeze(1)
-            weight_sum += dist_weight.unsqueeze(1)
+            # Accumulate weighted features AND similarity (matches original A2 formula exactly):
+            # val = (inter_k * dist_valid.float() * dist_weight).sum(0) / (dist_valid.float().sum(0) + 1e-6)
+            weight_mask = dist_valid.float() * dist_weight
+            all_features += point_features * weight_mask.unsqueeze(1)
+            all_similarity += point_similarity * weight_mask
+            valid_count += dist_valid.float().unsqueeze(1)  # Count valid, not sum weights!
 
-        # Weighted average across views
-        weight_sum = torch.clamp(weight_sum, min=1e-6)  # Avoid division by zero
-        pts_feat = all_features / weight_sum  # (N, D)
+        # Average across views (divide by count of valid views, not sum of weights)
+        # Original A2: dist_all_invalid = dist_valid.float().sum(0) == 0
+        all_invalid = valid_count.squeeze(1) < 1e-6  # Points with no valid views
+        valid_count_clamped = torch.clamp(valid_count, min=1e-6)  # Avoid division by zero
 
-        # Normalize features
-        pts_feat = pts_feat / (pts_feat.norm(dim=1, keepdim=True) + 1e-6)
+        # Average features
+        pts_feat = all_features / valid_count_clamped  # (N, D)
+        pts_feat[all_invalid] = 0.0
 
-        # Compute similarity to text
-        pts_sim = (pts_feat @ text_features.unsqueeze(1)).squeeze(1)  # (N,)
+        # Average similarity (CRITICAL: this is interpolated similarity, not recomputed!)
+        pts_sim = all_similarity / valid_count_clamped.squeeze(1)  # (N,)
+        pts_sim[all_invalid] = 0.0
+
+        # NOTE: Do NOT normalize features after averaging!
+        # Original A2 returns raw (unnormalized) interpolated features.
+        # The network's pts_multi_fusion does: fusion_feat = pts_feat * pts_sim
+        # Raw features * similarity = properly weighted features
 
         # Reshape for batch dimension
         pts_feat = pts_feat.unsqueeze(0)  # (1, N, D)

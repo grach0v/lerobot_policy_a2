@@ -273,25 +273,70 @@ class A2Policy(PreTrainedPolicy):
             return
 
         try:
-            # Get point cloud: (B, N, 6) where last 3 are RGB
+            # Get point clouds - support separate dense/sparse clouds
+            # CRITICAL: Original A2 uses:
+            #   - Dense cloud (voxel_size=0.0015) for GraspNet candidate generation
+            #   - Sparser cloud (voxel_size=0.01) with table filtered for CLIP features
             pc_tensor = batch["point_cloud"]
             if pc_tensor.dim() == 3:
-                pc = pc_tensor[0].cpu().numpy()  # (N, 6)
+                pc_graspnet = pc_tensor[0].cpu().numpy()  # (N, 6) - dense for GraspNet
             else:
-                pc = pc_tensor.cpu().numpy()
+                pc_graspnet = pc_tensor.cpu().numpy()
 
-            if len(pc) < 100:
-                print(f"Warning: Point cloud too sparse ({len(pc)} points), using fallback")
+            # Check for separate CLIP point cloud (sparser, table-filtered)
+            if "point_cloud_clip" in batch:
+                pc_clip_tensor = batch["point_cloud_clip"]
+                if pc_clip_tensor.dim() == 3:
+                    pc_clip = pc_clip_tensor[0].cpu().numpy()  # (N, 6) - sparse for CLIP
+                else:
+                    pc_clip = pc_clip_tensor.cpu().numpy()
+            else:
+                # Fallback: use same cloud for both (less optimal)
+                pc_clip = pc_graspnet
+
+            if len(pc_graspnet) < 100:
+                print(f"Warning: Point cloud too sparse ({len(pc_graspnet)} points), using fallback")
                 self._generate_fallback_grasp()
                 return
 
-            # Split into positions and colors
-            pts_pos = pc[:, :3]  # (N, 3)
-            pts_colors = pc[:, 3:6] / 255.0  # (N, 3) normalized
+            # Split GraspNet cloud into positions and colors
+            pts_pos_graspnet = pc_graspnet[:, :3]  # (N, 3)
+            pts_colors_graspnet = pc_graspnet[:, 3:6] / 255.0  # (N, 3) normalized
 
-            # Generate grasp candidates using GraspNet
+            # Split CLIP cloud into positions and colors
+            pts_pos_clip = pc_clip[:, :3]  # (M, 3)
+
+            # Filter PCD to GRASP workspace for pickplace (matching original A2 evaluator)
+            # Original A2 calls filter_pcd(pcd, GRASP_WORKSPACE_LIMITS) before GraspNet
+            is_pickplace = batch.get("is_pickplace", False)
+            if is_pickplace:
+                # Filter GraspNet cloud
+                workspace_mask = (
+                    (pts_pos_graspnet[:, 0] >= GRASP_WORKSPACE_LIMITS[0, 0]) & (pts_pos_graspnet[:, 0] <= GRASP_WORKSPACE_LIMITS[0, 1]) &
+                    (pts_pos_graspnet[:, 1] >= GRASP_WORKSPACE_LIMITS[1, 0]) & (pts_pos_graspnet[:, 1] <= GRASP_WORKSPACE_LIMITS[1, 1]) &
+                    (pts_pos_graspnet[:, 2] >= GRASP_WORKSPACE_LIMITS[2, 0]) & (pts_pos_graspnet[:, 2] <= GRASP_WORKSPACE_LIMITS[2, 1])
+                )
+                pts_pos_filtered = pts_pos_graspnet[workspace_mask]
+                pts_colors_filtered = pts_colors_graspnet[workspace_mask]
+                print(f"  [GRASP] Filtered PCD to grasp workspace: {len(pts_pos_filtered)} points (was {len(pts_pos_graspnet)})")
+
+                if len(pts_pos_filtered) < 100:
+                    print(f"  [GRASP] Warning: Too few points after filtering, using full PCD")
+                else:
+                    pts_pos_graspnet = pts_pos_filtered
+                    pts_colors_graspnet = pts_colors_filtered
+
+                # Also filter CLIP cloud to workspace
+                clip_mask = (
+                    (pts_pos_clip[:, 0] >= GRASP_WORKSPACE_LIMITS[0, 0]) & (pts_pos_clip[:, 0] <= GRASP_WORKSPACE_LIMITS[0, 1]) &
+                    (pts_pos_clip[:, 1] >= GRASP_WORKSPACE_LIMITS[1, 0]) & (pts_pos_clip[:, 1] <= GRASP_WORKSPACE_LIMITS[1, 1]) &
+                    (pts_pos_clip[:, 2] >= GRASP_WORKSPACE_LIMITS[2, 0]) & (pts_pos_clip[:, 2] <= GRASP_WORKSPACE_LIMITS[2, 1])
+                )
+                pts_pos_clip = pts_pos_clip[clip_mask] if np.sum(clip_mask) >= 100 else pts_pos_clip
+
+            # Generate grasp candidates using GraspNet with DENSE cloud
             grasp_generator = self._get_grasp_generator()
-            grasp_poses, _ = grasp_generator.generate_grasps(pts_pos, pts_colors)
+            grasp_poses, _ = grasp_generator.generate_grasps(pts_pos_graspnet, pts_colors_graspnet)
 
             if len(grasp_poses) == 0:
                 print("Warning: No grasps generated, using fallback")
@@ -328,13 +373,14 @@ class A2Policy(PreTrainedPolicy):
                     else:
                         print(f"  Warning: No grasps within {dist_thresh}m of targets, using all")
 
-            # Get CLIP features and compute visual-language similarity
+            # Get CLIP features using SPARSE point cloud (table-filtered, voxel_size=0.01)
+            # This matches original A2's generate_points_for_feature_extraction
             self._load_clip()
-            pts_feat, pts_sim = self._compute_clip_features(batch, pts_pos, self._lang_goal)
+            pts_feat, pts_sim = self._compute_clip_features(batch, pts_pos_clip, self._lang_goal)
 
             # Sample top K points by CLIP similarity (like original A2)
             sample_num = 500  # Default from original A2
-            pts_pos_tensor = torch.from_numpy(pts_pos).float().unsqueeze(0).to(self._device)
+            pts_pos_tensor = torch.from_numpy(pts_pos_clip).float().unsqueeze(0).to(self._device)
 
             if pts_sim.shape[1] > sample_num:
                 # Get indices of top K points by similarity
@@ -418,9 +464,7 @@ class A2Policy(PreTrainedPolicy):
 
             # Get the selected grasp pose
             self._target_pose = grasp_poses[best_idx].astype(np.float32)
-            # Ensure minimum grasp z for reliable execution
-            if self._target_pose[2] < 0.025:
-                self._target_pose[2] = 0.025
+            # Note: Don't enforce minimum z - original A2 grasps at z=0.002-0.016 successfully
             print(f"Selected grasp {best_idx}: pos={self._target_pose[:3]}, quat={self._target_pose[3:7]}")
 
         except Exception as e:
@@ -489,29 +533,26 @@ class A2Policy(PreTrainedPolicy):
         # Check if we have camera configs for proper per-point feature extraction
         if "camera_configs" in batch and "color_images" in batch:
             try:
-                from .feature_field import FeatureField
+                from .feature_field_simple import compute_per_point_features_simple
 
                 # Debug: show we're using per-point features
                 if not hasattr(self, "_debug_perpoint_shown"):
-                    print("  [CLIP] Using per-point feature extraction (camera configs available)")
+                    print("  [CLIP] Using simplified per-point feature extraction (like original A2)")
                     self._debug_perpoint_shown = True
-
-                # Create feature field if needed
-                if not hasattr(self, "_feature_field"):
-                    self._feature_field = FeatureField(device=device)
 
                 # Get camera configs and images
                 camera_configs = batch["camera_configs"]
                 color_images = batch["color_images"]
                 depth_images = batch.get("depth_images", None)
 
-                # Compute per-point features using multi-view projection
-                pts_feat, pts_sim = self._feature_field.compute_per_point_features(
+                # Compute per-point features using simplified Fusion (matches original A2 exactly)
+                pts_feat, pts_sim = compute_per_point_features_simple(
                     points=pts_pos,
                     images=color_images,
                     camera_configs=camera_configs,
                     lang_goal=lang_goal,
                     depth_images=depth_images,
+                    device=device,
                 )
 
                 # Pad features to match network width (768) if needed
@@ -1603,9 +1644,7 @@ class A2Policy(PreTrainedPolicy):
             self._generate_grasp_target(batch)
             if self._target_pose is not None:
                 grasp_pose = self._target_pose.copy()
-                # Ensure minimum grasp z height
-                if grasp_pose[2] < 0.025:
-                    grasp_pose[2] = 0.025
+                # Note: Don't enforce minimum z - original A2 grasps at z=0.002-0.016
                 return grasp_pose, {"source": "learned_networks"}
         except Exception as e:
             print(f"Warning: select_grasp_action failed: {e}")
